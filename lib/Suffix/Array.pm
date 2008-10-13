@@ -9,28 +9,18 @@ use List::RubyLike;
 use Params::Validate qw/validate_pos ARRAYREF SCALARREF/;
 use Perl6::Say;
 
-use constant UCHAR_MAX       => 0x100;
-use constant EOT             => ord "\$";
+use constant UCHAR_MAX => 0x100;
+use constant EOT       => "\0";
 
 sub new {
-    my ($class, $text) = validate_pos(@_, 1, 1);
+    my ($class, $text) = validate_pos(@_, 1, { type => SCALARREF });
     my $self = $class->SUPER::new;
 
-    $self->text  = \$text;
+    $self->text = $text;
     $self->array = list;
-    $self->_init;
     $self->_build_sa;
 
     bless $self, $class;
-}
-
-sub _init {
-    # my $self = shift;
-    # my $len = length ${$self->text};
-
-    # for (my $i = 0; $i < $len; $i++) {
-    #     $self->array->[$i] = $i;
-    #}
 }
 
 sub _build_sa {
@@ -38,9 +28,7 @@ sub _build_sa {
 
     my @text = unpack('C*', ${$self->text});
     my $len  = @text;
-
-    ## FIXME
-    push @text, EOT;
+    push @text, ord EOT;
 
     ## 先頭二文字で2文字分布数えソート
     my @count;
@@ -59,9 +47,6 @@ sub _build_sa {
     for (my $i = $len - 1; $i >= 0; $i--) {
         $self->array->[ --$count[ ($text[$i] << 8) + $text[$i + 1] ] ] = $i;
     }
-
-    # DEBUG
-    $self->show;
 
     ## [count[i], count[i + 1]) が次のソート区間
     ## (区間幅が 1 の区間はソート済み)
@@ -83,12 +68,11 @@ sub radix_sort {
         1,
     );
 
-    warn sprintf "zone [%d, %d], pos: $pos", $first, $last, $pos;
+    # warn sprintf "zone [%d, %d], pos: $pos", $first, $last, $pos;
 
     my $width = $last - $first;
     if ($width <= 32) {
-        warn sprintf 'changing to insert-sort ... (width: %d)', $width;
-
+       # warn sprintf 'changing to insert-sort ... (width: %d)', $width;
         insert_sort($array, $base, $first, $last, $pos);
         return;
     }
@@ -111,13 +95,6 @@ sub radix_sort {
         my $c = --$count[ $base->[ $array->[$i] + $pos ] ];
         $work[ $c + $first ] = $array->[$i];
     }
-
-    ## DEBUG
-    # $self->show;
-    #
-    # warn sprintf "first: %d, last: %d", $first, $last;
-    # require Data::Dumper;
-    # warn Data::Dumper::Dumper( \@work );
 
     for (my $i = $first; $i < $last; $i++) {
         $array->[$i] = $work[$i];
@@ -147,12 +124,26 @@ sub insert_sort {
         my $x = $array->[$i];
         my $j = $i - 1;
 
-        while ($j >= $first and $base->[$array->[$i] + $pos] < $base->[$array->[$j] + $pos]) {
+        ## FIMXE (EOT 置いてるのに...)
+        if ($array->[$i] + $pos >= @$base) {
+            last;
+        }
+
+        if ($array->[$j] + $pos >= @$base) {
+            last;
+        }
+
+        while ($j >= $first and $base->[$x + $pos] < $base->[$array->[$j] + $pos]) {
             $array->[$j + 1] = $array->[$j];
             $j--;
         }
 
         $array->[$j + 1] = $x;
+    }
+
+    ## FIXME: 入力が長いと stack over flow?
+    if ($pos < @$base) {
+        insert_sort($array, $base, $first, $last, $pos + 1);
     }
 }
 
