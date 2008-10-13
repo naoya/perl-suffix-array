@@ -71,7 +71,7 @@ sub radix_sort {
     # warn sprintf "zone [%d, %d], pos: $pos", $first, $last, $pos;
 
     my $width = $last - $first;
-    if ($width <= 32) {
+    if ($width <= 8) {
        # warn sprintf 'changing to insert-sort ... (width: %d)', $width;
         insert_sort($array, $base, $first, $last, $pos);
         return;
@@ -141,7 +141,7 @@ sub insert_sort {
         $array->[$j + 1] = $x;
     }
 
-    ## FIXME: 入力が長いと stack over flow?
+    ## FIXME: 入力が長いと stack over flow
     if ($pos < @$base) {
         insert_sort($array, $base, $first, $last, $pos + 1);
     }
