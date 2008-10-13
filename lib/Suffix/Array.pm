@@ -6,7 +6,11 @@ use base qw/Class::Accessor::Lvalue::Fast/;
 __PACKAGE__->mk_accessors(qw/text array/);
 
 use List::RubyLike;
-use Params::Validate qw/validate_pos/;
+use Params::Validate qw/validate_pos ARRAYREF SCALARREF/;
+use Perl6::Say;
+
+use constant UCHAR_MAX => 0x100;
+use constant EOT       => ord "\$";
 
 sub new {
     my ($class, $text) = validate_pos(@_, 1, 1);
@@ -21,24 +25,121 @@ sub new {
 }
 
 sub _init {
-    my $self = shift;
-    my $len = length ${$self->text};
-    for (0..$len-1) {
-        $self->array->[$_] = $_;
-    }
+    # my $self = shift;
+    # my $len = length ${$self->text};
+
+    # for (my $i = 0; $i < $len; $i++) {
+    #     $self->array->[$i] = $i;
+    #}
 }
 
 sub _build_sa {
     my $self = shift;
 
-    ## TODO1: ソートアルゴリズムを Ko and Aluru '03 など Suffix Array 専用のものに変更
-    ## TODO2: Sorter を変更できるようにする?
-    my $by_suffix = sub {
-        my ($a, $b) = @_;
-        substr(${$self->text}, $a) cmp substr(${$self->text}, $b);
-    };
+    my @text = unpack('C*', ${$self->text});
+    my $len  = @text;
 
-    $self->array = $self->array->sort($by_suffix);
+    ## FIXME
+    push @text, EOT;
+
+    ## 先頭二文字で2文字分布数えソート
+    my @count;
+    for (my $i = 0; $i < UCHAR_MAX * UCHAR_MAX; $i++) {
+        $count[$i] = 0;
+    }
+
+    for (my $i = 0; $i < $len; $i++) {
+        $count[ ($text[$i] << 8) + $text[$i + 1] ]++;
+    }
+
+    for (my $i = 0; $i < UCHAR_MAX * UCHAR_MAX; $i++) {
+        $count[$i + 1] += $count[$i];
+    }
+
+    for (my $i = $len - 1; $i >= 0; $i--) {
+        $self->array->[ --$count[ ($text[$i] << 8) + $text[$i + 1] ] ] = $i;
+    }
+
+    ## [count[i], count[i + 1]) が次のソート区間
+    ## (区間幅が 1 の区間はソート済み)
+    for (my $i = 0; $i < UCHAR_MAX * UCHAR_MAX - 1; $i++) {
+        if ($count[$i + 1] - $count[$i] > 1) {
+            radix_sort($self->array, $self->text, $count[$i], $count[$i + 1], 2);
+        }
+    }
+}
+
+## [first, last) がソート区間の Suffix Array のインデックス
+sub radix_sort {
+    my ($array, $text, $first, $last, $pos) = validate_pos(
+        @_,
+        { type => ARRAYREF },
+        { type => SCALARREF },
+        1,
+        1,
+        1,
+    );
+
+    warn sprintf "zone [%d, %d], pos: $pos", $first, $last, $pos;
+
+    ## FIXME
+    my @base = unpack('C*', $$text);
+    push @base, EOT;
+
+    my @count;
+    for (my $i = 0; $i < UCHAR_MAX; $i++) {
+        $count[$i] = 0;
+    }
+
+    for (my $i = $first; $i < $last; $i++) {
+        $count[ $base[ $array->[$i] + $pos ] ]++;
+    }
+
+    for (my $i = 0; $i < UCHAR_MAX; $i++) {
+        $count[$i + 1] += $count[$i];
+    }
+
+    my @work;
+    for (my $i = $last - 1; $i >= $first; $i--) {
+        my $c = --$count[ $base[ $array->[$i] + $pos ] ];
+        $work[ $c + $first ] = $array->[$i];
+    }
+
+    ## DEBUG
+    # $self->show;
+    #
+    # warn sprintf "first: %d, last: %d", $first, $last;
+    # require Data::Dumper;
+    # warn Data::Dumper::Dumper( \@work );
+
+    for (my $i = $first; $i < $last; $i++) {
+        $array->[$i] = $work[$i];
+    }
+
+    for (my $i = 0; $i < UCHAR_MAX; $i++) {
+        my $f = $first + $count[$i];
+        my $l = $first + $count[$i + 1];
+
+        if ($l - $f > 1) {
+            radix_sort($array, $text, $f, $l, $pos + 1);
+        }
+    }
+}
+
+sub insert_sort ($$) {
+    my ($array, $base, $first, $last) = validate_pos(@_, { type => ARRAYREF }, { typ => ARRAYREF}, 1 , 1);
+
+    for (my $i = $first + 1; $i < $last; $i++) {
+        my $n = $array->[$i];
+        my $j = $i - 1;
+
+        while ($j >= $first and $base->[$n] < $base->[$array->[$j]]) {
+            $array->[$j + 1] = $array->[$j];
+            $j--;
+        }
+
+        $array->[$j + 1] = $n;
+    }
 }
 
 sub search_index {
