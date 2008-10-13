@@ -9,8 +9,8 @@ use List::RubyLike;
 use Params::Validate qw/validate_pos ARRAYREF SCALARREF/;
 use Perl6::Say;
 
-use constant UCHAR_MAX => 0x100;
-use constant EOT       => ord "\$";
+use constant UCHAR_MAX       => 0x100;
+use constant EOT             => ord "\$";
 
 sub new {
     my ($class, $text) = validate_pos(@_, 1, 1);
@@ -60,21 +60,24 @@ sub _build_sa {
         $self->array->[ --$count[ ($text[$i] << 8) + $text[$i + 1] ] ] = $i;
     }
 
+    # DEBUG
+    $self->show;
+
     ## [count[i], count[i + 1]) が次のソート区間
     ## (区間幅が 1 の区間はソート済み)
     for (my $i = 0; $i < UCHAR_MAX * UCHAR_MAX - 1; $i++) {
         if ($count[$i + 1] - $count[$i] > 1) {
-            radix_sort($self->array, $self->text, $count[$i], $count[$i + 1], 2);
+            radix_sort($self->array, \@text, $count[$i], $count[$i + 1], 2);
         }
     }
 }
 
 ## [first, last) がソート区間の Suffix Array のインデックス
 sub radix_sort {
-    my ($array, $text, $first, $last, $pos) = validate_pos(
+    my ($array, $base, $first, $last, $pos) = validate_pos(
         @_,
         { type => ARRAYREF },
-        { type => SCALARREF },
+        { type => ARRAYREF },
         1,
         1,
         1,
@@ -82,9 +85,13 @@ sub radix_sort {
 
     warn sprintf "zone [%d, %d], pos: $pos", $first, $last, $pos;
 
-    ## FIXME
-    my @base = unpack('C*', $$text);
-    push @base, EOT;
+    my $width = $last - $first;
+    if ($width <= 32) {
+        warn sprintf 'changing to insert-sort ... (width: %d)', $width;
+
+        insert_sort($array, $base, $first, $last, $pos);
+        return;
+    }
 
     my @count;
     for (my $i = 0; $i < UCHAR_MAX; $i++) {
@@ -92,7 +99,7 @@ sub radix_sort {
     }
 
     for (my $i = $first; $i < $last; $i++) {
-        $count[ $base[ $array->[$i] + $pos ] ]++;
+        $count[ $base->[ $array->[$i] + $pos ] ]++;
     }
 
     for (my $i = 0; $i < UCHAR_MAX; $i++) {
@@ -101,7 +108,7 @@ sub radix_sort {
 
     my @work;
     for (my $i = $last - 1; $i >= $first; $i--) {
-        my $c = --$count[ $base[ $array->[$i] + $pos ] ];
+        my $c = --$count[ $base->[ $array->[$i] + $pos ] ];
         $work[ $c + $first ] = $array->[$i];
     }
 
@@ -121,24 +128,31 @@ sub radix_sort {
         my $l = $first + $count[$i + 1];
 
         if ($l - $f > 1) {
-            radix_sort($array, $text, $f, $l, $pos + 1);
+            radix_sort($array, $base, $f, $l, $pos + 1);
         }
     }
 }
 
-sub insert_sort ($$) {
-    my ($array, $base, $first, $last) = validate_pos(@_, { type => ARRAYREF }, { typ => ARRAYREF}, 1 , 1);
+sub insert_sort {
+    my ($array, $base, $first, $last, $pos) = validate_pos(
+        @_,
+        { type => ARRAYREF },
+        { type => ARRAYREF },
+        1,
+        1,
+        1,
+    );
 
     for (my $i = $first + 1; $i < $last; $i++) {
-        my $n = $array->[$i];
+        my $x = $array->[$i];
         my $j = $i - 1;
 
-        while ($j >= $first and $base->[$n] < $base->[$array->[$j]]) {
+        while ($j >= $first and $base->[$array->[$i] + $pos] < $base->[$array->[$j] + $pos]) {
             $array->[$j + 1] = $array->[$j];
             $j--;
         }
 
-        $array->[$j + 1] = $n;
+        $array->[$j + 1] = $x;
     }
 }
 
